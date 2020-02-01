@@ -4,17 +4,11 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.core.util.StatusPrinter;
 import core.org.akaza.openclinica.bean.core.Status;
 import core.org.akaza.openclinica.bean.core.Utils;
-import core.org.akaza.openclinica.bean.managestudy.StudyBean;
 import core.org.akaza.openclinica.bean.managestudy.StudySubjectBean;
 import core.org.akaza.openclinica.bean.service.StudyParameterValueBean;
-import core.org.akaza.openclinica.web.pform.OpenRosaService;
-import core.org.akaza.openclinica.web.pform.OpenRosaXMLUtil;
-import core.org.akaza.openclinica.web.pform.PFormCache;
-import org.akaza.openclinica.controller.openrosa.OpenRosaSubmissionController;
 import core.org.akaza.openclinica.core.util.EncryptionUtil;
 import core.org.akaza.openclinica.dao.core.CoreResources;
 import core.org.akaza.openclinica.dao.hibernate.*;
-import core.org.akaza.openclinica.dao.managestudy.StudyDAO;
 import core.org.akaza.openclinica.dao.service.StudyParameterValueDAO;
 import core.org.akaza.openclinica.domain.datamap.*;
 import core.org.akaza.openclinica.domain.user.UserAccount;
@@ -27,6 +21,7 @@ import core.org.akaza.openclinica.web.pform.formlist.XFormList;
 import core.org.akaza.openclinica.web.pform.manifest.Manifest;
 import core.org.akaza.openclinica.web.pform.manifest.MediaFile;
 import core.org.akaza.openclinica.web.restful.ODMClinicaDataResource;
+import org.akaza.openclinica.controller.openrosa.OpenRosaSubmissionController;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -127,6 +122,9 @@ public class OpenRosaServices {
     public static final String DASH = "-";
     public static final String CONTACTDATA = "contactdata";
     public static final String UNSCHECDULED = "unscheduled";
+    public static final String CURRENT_EVENT = "CURRENT_EVENT";
+    public static final String OPEN_BRACKET = "[";
+    public static final String CLOSE_BRACKET = "]";
 
     public static final String FORM_CONTEXT = "ecid";
     private static final Logger LOGGER = LoggerFactory.getLogger(OpenRosaServices.class);
@@ -137,7 +135,7 @@ public class OpenRosaServices {
     private SCDItemMetadataDao scdItemMetadataDao;
     ParticipantPortalRegistrar participantPortalRegistrar;
     protected final Logger logger = LoggerFactory.getLogger(getClass().getName());
-    StudyDAO sdao;
+
 
     static ConcurrentMap<String, String> studyUserMap = new ConcurrentHashMap<>();
     /**
@@ -296,12 +294,12 @@ public class OpenRosaServices {
 
         }
 
-        StudyBean publicStudy = getPublicStudy(studyOID);
+        Study publicStudy = getPublicStudy(studyOID);
         CoreResources.setRequestSchema(publicStudy.getSchemaName());
         LOGGER.info("Schema name after setting it to : " + CoreResources.getRequestSchema());
         LOGGER.info("StudyOid is :" + studyOID);
 
-        StudyBean study = getParentStudy(studyOID);
+        Study study = getParentStudy(studyOID);
 
         String xformOutput = "";
         String attribute = "";
@@ -448,8 +446,7 @@ public class OpenRosaServices {
             userList.setDownloadUrl(urlBase + "/rest2/openrosa/" + studyOID + "/downloadUsers?ecid=" + ecid);
             manifest.add(userList);
         }
-        
-        MediaFile odmPayload = new MediaFile();        
+        MediaFile odmPayload = new MediaFile();
 
         odmPayload.setFilename("clinicaldata.xml");
         odmPayload.setDownloadUrl(urlBase + "/rest2/openrosa/" + studyOID + "/" + ecid + "/" + formID);
@@ -538,9 +535,9 @@ public class OpenRosaServices {
             LOGGER.info("formLayoutOID from ecid: " + formLayoutOID);
             LOGGER.info("formLoadMode from ecid: " + formLoadMode);
         }
-        StudyBean publicStudy = getPublicStudy(studyOID);
+        Study publicStudy = getPublicStudy(studyOID);
         CoreResources.setRequestSchema(publicStudy.getSchemaName());
-        StudyBean study = getParentStudy(studyOID);
+        Study study = getParentStudy(studyOID);
         LOGGER.info("Schema name after setting it to: " + CoreResources.getRequestSchema());
 
         CrfBean crf = formLayout.getCrf();
@@ -606,7 +603,7 @@ public class OpenRosaServices {
             @RequestHeader("Authorization") String authorization, @Context ServletContext context) throws Exception {
         if (!mayProceedPreview(request, studyOID))
             return null;
-        StudyBean publicStudy = getPublicStudy(studyOID);
+        Study publicStudy = getPublicStudy(studyOID);
         CoreResources.setRequestSchema(publicStudy.getSchemaName());
         // Decrypt the encrypted form layout media id
         String encryptionKey = getCoreResources().getDataInfo().getProperty(DATABASE_ID_ENCRYPTION_KEY_PROPERTY);
@@ -851,24 +848,22 @@ public class OpenRosaServices {
         this.scdItemMetadataDao = scdItemMetadataDao;
     }
 
-    private StudyBean getStudy(String oid) {
-        sdao = new StudyDAO(dataSource);
-        StudyBean studyBean = (StudyBean) sdao.findByOid(oid);
+    private Study getStudy(String oid) {
+        Study studyBean = (Study) studyDao.findByOcOID(oid);
         return studyBean;
     }
 
-    private StudyBean getStudyById(int id) {
-        sdao = new StudyDAO(dataSource);
-        StudyBean studyBean = (StudyBean) sdao.findByPK(id);
-        return studyBean;
+    private Study getStudyById(int id) {
+        Study study = (Study) studyDao.findByPK(id);
+        return study;
     }
 
-    private StudyBean getParentStudy(String studyOid) {
-        StudyBean study = getStudy(studyOid);
-        if (study.getParentStudyId() == 0) {
+    private Study getParentStudy(String studyOid) {
+        Study study = getStudy(studyOid);
+        if (!study.isSite()) {
             return study;
         } else {
-            StudyBean parentStudy = (StudyBean) sdao.findByPK(study.getParentStudyId());
+            Study parentStudy = study.getStudy();
             return parentStudy;
         }
 
@@ -910,8 +905,8 @@ public class OpenRosaServices {
             ssBean = ssDao.findByOcOID(studySubjectOID);
             studyAndSiteEnvUuid.currentUser = userAccountDao.findByUserId(userAccountID);
         }
-        StudyBean publicStudy = null;
-        StudyBean parentPublicStudy = null;
+        Study publicStudy = null;
+        Study parentPublicStudy = null;
         if (ssBean != null) {
             publicStudy = getPublicStudy(ssBean.getStudy().getOc_oid());
             parentPublicStudy = getParentPublicStudy(ssBean.getStudy().getOc_oid());
@@ -919,7 +914,7 @@ public class OpenRosaServices {
             publicStudy = getPublicStudy(studyOID);
             parentPublicStudy = getParentPublicStudy(studyOID);
         }
-        if (publicStudy.getParentStudyId() == 0) {
+        if (!publicStudy.isSite()) {
             studyAndSiteEnvUuid.studyEnvUuid = publicStudy.getStudyEnvUuid();
         } else {
             studyAndSiteEnvUuid.studyEnvUuid = parentPublicStudy.getStudyEnvUuid();
@@ -940,11 +935,11 @@ public class OpenRosaServices {
         StudySubject ssBean = ssDao.findByOcOID(studySubjectOID);
 
         if (ssBean != null) {
-            StudyBean publicStudy = getPublicStudy(ssBean.getStudy().getOc_oid());
-            StudyBean parentPublicStudy = getParentPublicStudy(ssBean.getStudy().getOc_oid());
+            Study publicStudy = getPublicStudy(ssBean.getStudy().getOc_oid());
+            Study parentPublicStudy = getParentPublicStudy(ssBean.getStudy().getOc_oid());
             CoreResources.setRequestSchema("public");
             UserAccount currentUser = userAccountDao.findByUserId(userAccountID);
-            users = userAccountDao.findNonRootNonParticipateUsersByStudyId(publicStudy.getId(), parentPublicStudy.getId());
+            users = userAccountDao.findNonRootNonParticipateUsersByStudyId(publicStudy.getStudyId(), parentPublicStudy.getStudyId());
             CoreResources.setRequestSchema(publicStudy.getSchemaName());
             for (UserAccount userAccount : users) {
                 Element item = doc.createElement("item");
@@ -969,9 +964,9 @@ public class OpenRosaServices {
 
     private boolean mayProceedSubmission(String studyOid, StudySubjectBean ssBean) throws Exception {
         boolean accessPermission = false;
-        StudyBean study = getParentPublicStudy(studyOid);
+        Study study = getParentPublicStudy(studyOid);
         StudyParameterValueDAO spvdao = new StudyParameterValueDAO(dataSource);
-        StudyParameterValueBean pStatus = spvdao.findByHandleAndStudy(study.getId(), "participantPortal");
+        StudyParameterValueBean pStatus = spvdao.findByHandleAndStudy(study.getStudyId(), "participantPortal");
         participantPortalRegistrar = new ParticipantPortalRegistrar();
         String pManageStatus = participantPortalRegistrar.getRegistrationStatus(studyOid).toString(); // ACTIVE ,
         // PENDING ,
@@ -989,7 +984,7 @@ public class OpenRosaServices {
 
     private boolean mayProceedPreview(HttpServletRequest request, String studyOid) throws Exception {
         boolean accessPermission = false;
-        StudyBean study = getParentPublicStudy(studyOid);
+        Study study = getParentPublicStudy(studyOid);
         StudyParameterValueDAO spvdao = new StudyParameterValueDAO(dataSource);
         request.setAttribute("requestSchema", study.getSchemaName());
         // PENDING ,
@@ -1020,24 +1015,23 @@ public class OpenRosaServices {
         }
     }
 
-    private StudyBean getPublicStudy(String studyOid) {
+    private Study getPublicStudy(String studyOid) {
         String schema = CoreResources.getRequestSchema();
         CoreResources.setRequestSchema("public");
-        sdao = new StudyDAO(dataSource);
-        StudyBean studyBean = (StudyBean) sdao.findByOid(studyOid);
+        Study studyBean = (Study) studyDao.findByOcOID(studyOid);
         CoreResources.setRequestSchema(schema);
         return studyBean;
     }
 
-    private StudyBean getParentPublicStudy(String studyOid) {
-        StudyBean resultBean = null;
+    private Study getParentPublicStudy(String studyOid) {
+        Study resultBean = null;
         String schema = CoreResources.getRequestSchema();
         CoreResources.setRequestSchema("public");
-        StudyBean study = getStudy(studyOid);
-        if (study.getParentStudyId() == 0) {
+        Study study = getStudy(studyOid);
+        if (!study.isSite()) {
             resultBean = study;
         } else {
-            StudyBean parentStudy = (StudyBean) sdao.findByPK(study.getParentStudyId());
+            Study parentStudy = (Study) studyDao.findByPK(study.getStudy().getStudyId());
             resultBean = parentStudy;
         }
         CoreResources.setRequestSchema(schema);
@@ -1084,7 +1078,7 @@ public class OpenRosaServices {
     @Path("/{studyOID}/{ecid}/{formID}")
     @Produces(MediaType.TEXT_XML)
     public String getODMMetadata(@Context HttpServletRequest request, @PathParam("studyOID") String studyOID, @PathParam("ecid") String ecid,
-            @Context ServletContext context, @PathParam("formID") String formID,@DefaultValue("true") @QueryParam(value="includeClinicalData") boolean includeClinicalData) throws Exception {
+                                 @Context ServletContext context, @PathParam("formID") String formID,@DefaultValue("true") @QueryParam(value="includeClinicalData") boolean includeClinicalData) throws Exception {
         if (!mayProceedPreview(request, studyOID))
             return null;
         HashMap<String, String> subjectContext = null;
@@ -1121,17 +1115,19 @@ public class OpenRosaServices {
             phraseToLookForInOdm = "<StudyEventData StudyEventOID=\"" + sed.getOc_oid() + "\" StudyEventRepeatKey=\"" + studyEventRepeat + "\"";
         }
         String userAccountID = subjectContext.get("userAccountID");
-        
-        String result = null;        
+
+        String crossformReferenceEvents=getCrossFormReferenceEvents(formLayoutOID,studyOID,flavor,sed,studyEventRepeat);
+
+        String result = null;
         // first time call
         if(!includeClinicalData) {
-        	result = odmClinicalDataRestResource.getODMMetadata(studyOID, "*", studySubjectOID, "*", "no", "no", request, userAccountID, "no","no", "no","no","yes", "yes");        	        
+            result = odmClinicalDataRestResource.getODMMetadata(studyOID, "*", studySubjectOID, !StringUtils.isEmpty(crossformReferenceEvents) ?crossformReferenceEvents:"*", "no", "no", request, userAccountID, "no","no", "no","no","yes", "yes");
         }else {
-        	// 2nd time call
-        	result = odmClinicalDataRestResource.getODMMetadata(studyOID, "*", studySubjectOID, "*", "no", "no", request, userAccountID, "yes","no", "yes","no","yes", "n");        	
+            // 2nd time call
+            result = odmClinicalDataRestResource.getODMMetadata(studyOID, "*", studySubjectOID, !StringUtils.isEmpty(crossformReferenceEvents)?crossformReferenceEvents:"*", "no", "no", request, userAccountID, "yes","no", "yes","no","yes", "n");
 
         }
-        
+
         result = result.replaceAll("xmlns=\"http://www.cdisc.org/ns/odm/v1.3\"", "");
         result = result.replaceAll("xmlns:OpenClinica=\"http://www.openclinica.org/ns/odm_ext_v130/v3.1\"", "xmlns:OpenClinica=\"http://openclinica.com/odm\"");
         int index = result.indexOf(phraseToLookForInOdm);
@@ -1204,7 +1200,7 @@ public class OpenRosaServices {
         return builder.build();
     }
 
-    public List<Bind> getBinds(FormLayout formLayout, String flavor,String studyOid ) throws Exception {
+    public Html getHtml(FormLayout formLayout, String flavor,String studyOid ) throws Exception {
         String xformOutput = "";
         Study study =studyDao.findByOcOID(studyOid);
         Study parentStudy= study.getStudy()!=null?study.getStudy():study;
@@ -1216,6 +1212,14 @@ public class OpenRosaServices {
             studyFilePath--;
         } while (xformOutput.equals("") && studyFilePath > 0);
         Html html = xformParser.unMarshall(xformOutput);
+
+        return html;
+    }
+
+
+    public List<Bind> getBinds(FormLayout formLayout, String flavor, String studyOid) throws Exception {
+
+        Html html = getHtml(formLayout, flavor, studyOid);
         Body body = html.getBody();
         Head head = html.getHead();
         Model model = head.getModel();
@@ -1235,5 +1239,44 @@ public class OpenRosaServices {
         return formContainsContactData;
     }
 
+    private String getCrossFormReferenceEvents(String formLayoutOID, String studyOID, String flavor, StudyEventDefinition sed, String studyEventRepeat) throws Exception {
+        Html html = getHtml(getFormLayout(formLayoutOID), flavor, studyOID);
+        String crossformReferenceEvents = html.getHead().getCrossform_references();
+
+        if (crossformReferenceEvents == null || crossformReferenceEvents.equals("")) {
+            return null;
+        }
+
+        crossformReferenceEvents = crossformReferenceEvents.toUpperCase();
+        List<String> eventOids = Arrays.asList(crossformReferenceEvents.split("\\s*,\\s*"));
+
+        for (String eventOid : eventOids) {
+            if (!eventOid.equals(CURRENT_EVENT)) {
+                StudyEventDefinition studyEventDefinition = studyEventDefinitionDao.findByColumnName(eventOid.toUpperCase(), "oc_oid");
+                if (studyEventDefinition == null) {
+                    LOGGER.error("Invalid event oid in crossform_references: {}",crossformReferenceEvents);
+                    return null;
+                }
+            }
+        }
+
+        if (crossformReferenceEvents.contains(CURRENT_EVENT)) {
+            boolean currentEventIsInList = false;
+            for (String eventOid : eventOids) {
+                if (eventOid.equals(sed.getOc_oid())) {
+                    currentEventIsInList = true;
+                    break;
+                }
+            }
+
+            if (currentEventIsInList) {
+                crossformReferenceEvents = crossformReferenceEvents.replaceAll("(?i)"+CURRENT_EVENT, "");
+            } else {
+                crossformReferenceEvents = crossformReferenceEvents.replaceAll("(?i)"+CURRENT_EVENT, sed.getOc_oid() + OPEN_BRACKET + studyEventRepeat + CLOSE_BRACKET);
+            }
+        }
+
+        return crossformReferenceEvents;
+    }
 
 }

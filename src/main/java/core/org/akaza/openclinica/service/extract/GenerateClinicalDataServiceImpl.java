@@ -2,7 +2,6 @@ package core.org.akaza.openclinica.service.extract;
 
 import core.org.akaza.openclinica.bean.core.Utils;
 import core.org.akaza.openclinica.bean.login.UserAccountBean;
-import core.org.akaza.openclinica.bean.managestudy.StudyBean;
 import core.org.akaza.openclinica.bean.odmbeans.*;
 import core.org.akaza.openclinica.bean.submit.crfdata.*;
 import core.org.akaza.openclinica.dao.core.CoreResources;
@@ -163,12 +162,13 @@ public class GenerateClinicalDataServiceImpl implements GenerateClinicalDataServ
 		List<ExportSubjectDataBean> exportSubjDataBeanList = new ArrayList<ExportSubjectDataBean>();
 		List<String> tagIds = null;
 		if(!odmFilter.isCrossForm()) {
-			StudyBean studyBean = new StudyBean();
-			studyBean.setId(study.getStudyId());
+			Study studyBean = new Study();
+			studyBean.setStudyId(study.getStudyId());
 			studyBean.setStudyEnvUuid(study.getStudyEnvUuid());
 			studyBean.setStudyUuid(study.getStudyUuid());
 			studyBean.setStudyEnvSiteUuid(study.getStudyEnvSiteUuid());
-			studyBean.setParentStudyId(study.getStudy() != null ? study.getStudy().getStudyId() : 0);
+			if(study.isSite())
+				studyBean.setStudy(study);
 			tagIds = permissionService.getPermissionTagsList(studyBean, getRequest());
 		}
 
@@ -325,10 +325,10 @@ public class GenerateClinicalDataServiceImpl implements GenerateClinicalDataServ
 
 					if (isActiveRoleAtSite) {
 						siteId = study.getStudyId();
-						parentStudyId = study.getStudy().getStudyId();
+						parentStudyId = study.checkAndGetParentStudyId();
 						hiddenCrfs = listOfHiddenCrfs(siteId, parentStudyId, edcs, ecrf);
 					} else {
-						parentStudyId = study.getStudy().getStudyId();
+						parentStudyId = study.checkAndGetParentStudyId();
 						hiddenCrfs = listOfHiddenCrfs(parentStudyId, parentStudyId, edcs, ecrf);
 					}
 
@@ -341,7 +341,7 @@ public class GenerateClinicalDataServiceImpl implements GenerateClinicalDataServ
 
 					if (eventDefinitionCrf == null) {
 						eventDefinitionCrf = getEventDefinitionCrfDao().findByStudyEventDefinitionIdAndCRFIdAndStudyId(
-								se.getStudyEventDefinition().getStudyEventDefinitionId(), ecrf.getFormLayout().getCrf().getCrfId(), study.getStudy().getStudyId());
+								se.getStudyEventDefinition().getStudyEventDefinitionId(), ecrf.getFormLayout().getCrf().getCrfId(), study.checkAndGetParentStudyId());
 					}
 
 				} else {
@@ -969,28 +969,33 @@ public class GenerateClinicalDataServiceImpl implements GenerateClinicalDataServ
 	}
 
 	private OdmClinicalDataBean getClinicalDatas(String studyOID, String studySubjectOID, String studyEventOID, String formVersionOID, int userId) {
-		int seOrdinal = 0;
-		String temp = studyEventOID;
-		List<StudyEvent> studyEvents = new ArrayList<StudyEvent>();
-		StudyEventDefinition studyEventDefinition = null;
-		Study study = getStudyDao().findByColumnName(studyOID, "oc_oid");
-		List<StudySubject> ss = listStudySubjects(studySubjectOID);
-		int idx = studyEventOID.indexOf(OPEN_ORDINAL_DELIMITER);
-		LOGGER.info("study event oridinal is.." + idx);
-		if (idx > 0) {
-			studyEventOID = studyEventOID.substring(0, idx);
-			seOrdinal = new Integer(temp.substring(idx + 1, temp.indexOf(CLOSE_ORDINAL_DELIMITER))).intValue();
-		}
-		studyEventDefinition = getStudyEventDefDao().findByColumnName(studyEventOID, "oc_oid");
-		LOGGER.info("study event ordinal.." + seOrdinal);
-		if (seOrdinal > 0) {
-			studyEvents = studyEventDao.fetchStudyEvents(seOrdinal, studyEventDefinition.getOc_oid(), studySubjectOID);
-		}
-		else {
-			studyEvents = studyEventDao.fetchStudyEvents(studyEventDefinition.getOc_oid(), studySubjectOID);
-		}
 
-		return constructClinicalDataStudy(ss, study, studyEvents, formVersionOID,userId);
+		List<String> eventOids = Arrays.asList(studyEventOID.split("\\s*,\\s*"));
+		List<StudySubject> ss = listStudySubjects(studySubjectOID);
+		Study study = getStudyDao().findByColumnName(studyOID, "oc_oid");
+		List<StudyEvent> studyEvents = new ArrayList<StudyEvent>();
+
+		for (String eventOid : eventOids) {
+			int seOrdinal = 0;
+
+			StudyEventDefinition studyEventDefinition = null;
+			int idx = eventOid.indexOf(OPEN_ORDINAL_DELIMITER);
+			LOGGER.info("study event oridinal is.." + idx);
+			if (idx > 0) {
+				seOrdinal = new Integer(eventOid.substring(idx + 1, eventOid.indexOf(CLOSE_ORDINAL_DELIMITER))).intValue();
+				eventOid = eventOid.substring(0, idx);
+			}
+			studyEventDefinition = getStudyEventDefDao().findByColumnName(eventOid, "oc_oid");
+			LOGGER.info("study event ordinal.." + seOrdinal);
+			if (studyEventDefinition != null) {
+				if (seOrdinal > 0) {
+					studyEvents.addAll(studyEventDao.fetchStudyEvents(seOrdinal, studyEventDefinition.getOc_oid(), studySubjectOID));
+				} else {
+					studyEvents.addAll(studyEventDao.fetchStudyEvents(studyEventDefinition.getOc_oid(), studySubjectOID));
+				}
+			}
+		}
+			return constructClinicalDataStudy(ss, study, studyEvents, formVersionOID, userId);
 	}
 
 	public UserAccountDao getUserAccountDao() {

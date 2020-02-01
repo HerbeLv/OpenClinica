@@ -25,7 +25,6 @@ import core.org.akaza.openclinica.bean.core.Status;
 import core.org.akaza.openclinica.bean.core.SubjectEventStatus;
 import core.org.akaza.openclinica.bean.core.Utils;
 import core.org.akaza.openclinica.bean.managestudy.EventDefinitionCRFBean;
-import core.org.akaza.openclinica.bean.managestudy.StudyBean;
 import core.org.akaza.openclinica.bean.managestudy.StudyEventBean;
 import core.org.akaza.openclinica.bean.managestudy.StudyEventDefinitionBean;
 import core.org.akaza.openclinica.bean.managestudy.StudySubjectBean;
@@ -49,6 +48,7 @@ import core.org.akaza.openclinica.dao.submit.ItemDataDAO;
 import core.org.akaza.openclinica.dao.submit.ItemFormMetadataDAO;
 import core.org.akaza.openclinica.dao.submit.ItemGroupDAO;
 import core.org.akaza.openclinica.dao.submit.ItemGroupMetadataDAO;
+import core.org.akaza.openclinica.domain.datamap.Study;
 import core.org.akaza.openclinica.domain.datamap.StudyEvent;
 import core.org.akaza.openclinica.domain.rule.RuleSetBean;
 import core.org.akaza.openclinica.domain.rule.expression.ExpressionObjectWrapper;
@@ -101,13 +101,13 @@ public class ExpressionService {
     public final static String STARTDATE = ".STARTDATE";
     public final static String STATUS = ".STATUS";
     public static final String STUDY_EVENT_OID_START_KEY = "SE_";
+
     /*
      * The variables below are used as a small Cache so that we don't go to the
      * database every time we want to get an Object by it's OID. This is a very
      * stripped down cache which will help performance in a single
      * request/response cycle.
      */
-    private HashMap<String, StudyEventDefinitionBean> studyEventDefinitions;
     private HashMap<String, ItemGroupBean> itemGroups;
     private HashMap<String, ItemBean> items;
 
@@ -158,7 +158,6 @@ public class ExpressionService {
                                                                                                        // ordinal
         ruleActionPattern[0] = Pattern.compile(CRF_OID_OR_ITEM_DATA_PATTERN); // ITEM_DATA_OID
 
-        this.studyEventDefinitions = new HashMap<String, StudyEventDefinitionBean>();
         this.itemGroups = new HashMap<String, ItemGroupBean>();
         this.items = new HashMap<String, ItemBean>();
 
@@ -945,25 +944,16 @@ public class ExpressionService {
             return null;
     }
 
-    public StudyEventDefinitionBean getStudyEventDefinitionFromExpressionForEvents(String expression, StudyBean study) {
+    public StudyEventDefinitionBean getStudyEventDefinitionFromExpressionForEvents(String expression, Study study) {
         // TODO Auto-generated method stub
         String studyEventDefinitionKey = getStudyEventDefinitionOidFromExpressionForEvents(expression);
-        logger.debug("Expression : {} , Study Event Definition OID {} , Study Bean {} ", new Object[] { expression, studyEventDefinitionKey, study.getId() });
-        if (studyEventDefinitions.get(studyEventDefinitionKey) != null) {
-            return studyEventDefinitions.get(studyEventDefinitionKey);
-        } else {
-            // temp fix
-            int studyId = study.getParentStudyId() != 0 ? study.getParentStudyId() : study.getId();
+        logger.debug("Expression : {} , Study Event Definition OID {} , Study Bean {} ", new Object[] { expression, studyEventDefinitionKey, study.getStudyId() });
+            int studyId = study.isSite() ? study.getStudy().getStudyId() : study.getStudyId();
             StudyEventDefinitionBean studyEventDefinition = getStudyEventDefinitionDao().findByOidAndStudy(studyEventDefinitionKey, studyId, studyId);
             // another way to get at the problem which I fix in the
             // findByOidAndStudy method, tbh
-            if (studyEventDefinition != null) {
-                studyEventDefinitions.put(studyEventDefinitionKey, studyEventDefinition);
-                return studyEventDefinition;
-            } else {
-                return null;
-            }
-        }
+
+            return studyEventDefinition;
 
     }
 
@@ -971,24 +961,14 @@ public class ExpressionService {
         return getOidFromExpression(expression, 1, 1).replaceAll(BRACKETS_AND_CONTENTS, "");
     }
 
-    public StudyEventDefinitionBean getStudyEventDefinitionFromExpression(String expression, StudyBean study) {
+    public StudyEventDefinitionBean getStudyEventDefinitionFromExpression(String expression, Study study) {
         String studyEventDefinitionKey = getStudyEventDefinitionOidFromExpression(expression);
-        logger.debug("Expression : {} , Study Event Definition OID {} , Study Bean {} ", new Object[] { expression, studyEventDefinitionKey, study.getId() });
-        if (studyEventDefinitions.get(studyEventDefinitionKey) != null) {
-            return studyEventDefinitions.get(studyEventDefinitionKey);
-        } else {
-            // temp fix
-            int studyId = study.getParentStudyId() != 0 ? study.getParentStudyId() : study.getId();
+        logger.debug("Expression : {} , Study Event Definition OID {} , Study Bean {} ", new Object[] { expression, studyEventDefinitionKey, study.getStudyId() });
+            int studyId = study.isSite() ? study.getStudy().getStudyId() : study.getStudyId();
             StudyEventDefinitionBean studyEventDefinition = getStudyEventDefinitionDao().findByOidAndStudy(studyEventDefinitionKey, studyId, studyId);
             // another way to get at the problem which I fix in the
             // findByOidAndStudy method, tbh
-            if (studyEventDefinition != null) {
-                studyEventDefinitions.put(studyEventDefinitionKey, studyEventDefinition);
                 return studyEventDefinition;
-            } else {
-                return null;
-            }
-        }
     }
 
     public StudyEventDefinitionBean getStudyEventDefinitionFromExpressionForEventScheduling(String expression) {
@@ -996,7 +976,7 @@ public class ExpressionService {
     }
 
     public StudyEventDefinitionBean getStudyEventDefinitionFromExpressionForEventScheduling(String expression, boolean onlyOID) {
-        StudyBean study = expressionWrapper.getStudyBean();
+        Study study = expressionWrapper.getStudyBean();
         String studyEventDefinitionKey;
         if (onlyOID)
             studyEventDefinitionKey = expression.replaceAll(BRACKETS_AND_CONTENTS, "");
@@ -1004,20 +984,11 @@ public class ExpressionService {
             studyEventDefinitionKey = getOidFromExpression(expression, 1, 1).replaceAll(BRACKETS_AND_CONTENTS, "");
 
         logger.debug("Expression : {} , Study Event Definition OID {} , Study Bean {} ",
-                new Object[] { expression, studyEventDefinitionKey, study != null ? study.getId() : null });
-        if (studyEventDefinitions.get(studyEventDefinitionKey) != null) {
-            return studyEventDefinitions.get(studyEventDefinitionKey);
-        } else {
+                new Object[] { expression, studyEventDefinitionKey, study != null ? study.getStudyId() : null });
             StudyEventDefinitionBean studyEventDefinition = getStudyEventDefinitionDao().findByOid(studyEventDefinitionKey);
             // another way to get at the problem which I fix in the
             // findByOidAndStudy method, tbh
-            if (studyEventDefinition != null) {
-                studyEventDefinitions.put(studyEventDefinitionKey, studyEventDefinition);
-                return studyEventDefinition;
-            } else {
-                return null;
-            }
-        }
+            return studyEventDefinition;
     }
 
     public ItemGroupBean getItemGroupExpression(String expression) {
